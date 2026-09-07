@@ -1,0 +1,816 @@
+# ATmega Processors
+Normally ATmega32L has an operating voltage of 2.7v-5.5v at 0-8MHz Clock speed, while ATmega32 has an operating voltage of 4.5v-5.5v at 0-16MHz Clock speed.
+ATmega32A has an operating voltage of 2.7v-5.5v at 0-16MHz clock speed.
+
+# Code Structure
+In Interfacing normally you have your code always repeated, if you have written a sensor program, you need every 2 seconds to get reading from this sensor.
+```c
+#include <sensor.h>
+
+int main(void) {
+	calibrate_sensor();
+	// This is called only 1 time at the start of the program.
+
+	// We call this the setup.
+	
+	int reading = 0;
+	while(1) {
+		reading = sensor_getReading();
+		delay_ms(1000);
+		// This is repeated every 1s.
+
+		// We call this the loop.
+	}
+}
+```
+
+# DIO Module
+Digital Input Output Module is the first module we will take in the interfacing. This module is concerned with making the GPIO pins function as either digital input or digital output.
+
+## General Purpose Input Ouptut Pins (GPIO)
+They are the micro-controlller's pins that have no special function, anything other than:
+- Power Pins (Vss, Vdd, AVcc, AREF, ...)
+- Clock Pins (XTAL1, XTAL2, ...)
+
+In ATmega32 we have 40 pins, 8 are special purpose pins and the rest (32) are GPIO pins.
+GPIO pins allows us to interface with other components either making it an output like led, or making it an input like a sensor.
+We can control their direction and their values using special function registers described in the datasheet.
+
+## Hardware Registers
+Those 32 pins are divided into 4 ports:
+- Port A (PA0-PA7)
+- Port B (PB0-PB7)
+- Port C (PC0-PC7)
+- Port D (PD0-PD7)
+
+![Technical schematic of ATmega32A 40-pin DIP package showing the primary subject: pin layout and port assignments. The diagram labels pins PA0 through PA7, PB0 through PB7, PC0 through PC7, and PD0 through PD7 and marks special function pins Vss, Vdd, AVcc, AREF, XTAL1, and XTAL2. Text labels and pin numbers are shown on a plain background for reference and identification. The tone is technical and instructional.]
+
+Each Port has 3 dedicated registers, for Port A:
+- DDRA
+- PORTA
+- PINA
+
+and for Port X:
+- DDRX
+- PORTX
+- PINX
+
+![Three 8-bit register diagrams for Port A showing DDRA, PORTA, and PINA. The primary subject is the register bit layouts with labels: DDRA Data Direction Register where 1 indicates output and 0 indicates input; PORTA Port A Data Register showing output values; PINA Port A Input Register showing input readings. The image is schematic and educational on a neutral background.]
+
+Pin **PA0** is connected to the LSB of register `DDRA`, `PORTA`, `PINA`, as well as each pin **PA(i)** is connected to the **i-th** bit in each register.
+
+### DDRA Register
+*pinMode() equivalent for arduino users.*
+
+This register is called data direction register it controls the direciton (I/O) of the pins, if `DDRA[5]` is **LOW**, then the **PA5** pin is **input**, if `DDRA[5]` is **HIGH**, then the **PA5** pin is **output**. Each pin is solely configurable which means you can have `DDRA[4]` **HIGH** and `DDRA[3]` **LOW**, so **PA4** is **input** and **PA3** is **ouput**.
+
+Since the defualt value for the register is `0000 0000` all pins are initially input, till you modify them in the initialization part.
+
+### PORTA Register
+*digitalWrite() equivalent for arduino users.*
+
+This register is the output register.
+Imagine you successfuly configured **PA0** as an output pin. What value do you want to write on it?
+If `PORTA[0]` is **HIGH**, then **PA0** is outputing **Vcc** Voltage, If `PORTA[0]` is **LOW**, then **PA0** is outputing **GND** Voltage.
+
+If **PA0** was configured as an input pin, the value of the `PORTA[0]` is ignored.
+
+Since the default value for the register is `0000 0000` all pins are initially outputing **Gnd** Voltage if they are configured output pins.
+
+### PINA Register
+*digitalRead() equivalent for arduino users.*
+
+This register is the input register.
+Imagine you successfuly configured **PA0** as an input pin. What is the value you are reading? 
+The value you recieve from the input device at pin **PA0** is stored in `PINA[0]`.
+
+If **PA0** was configured as an output pin, the value of the `PINA[0]` is ignored.
+
+The default value of the PIN register is not available.
+
+![Side by side 8-bit diagrams for DDRA, PORTA, and PINA registers. The primary subject is the comparison of register roles: DDRA sets pin direction, PORTA holds output values, and PINA reflects input values. Each register shows bit positions labeled 7 down to 0. The style is a clear technical reference on a white background.]
+
+---
+## Hardware Circuitry
+
+### Tri-State Buffer Recall
+A tri-state buffer consists of 3 pins (input, output, controller), if you have the controller HIGH, then you are connecting the input with the output directly (Short Circuit), if the controller is LOW, then you are disconnected (Open Circuit) it is now floating pin (HI-Z).
+
+![Schematic of a tri-state buffer showing three terminals: input, output, and controller. The primary subject is the control behavior: when controller is high the input is connected to the output, when controller is low the output is disconnected and left at high impedance labeled HI-Z. The diagram is instructional and neutral in tone.]
+
+### Registers Connection
+When the `DDRA[0]` Register is set to output (HIGH) it makes the tri-state buffer function as a short, so the voltage at `PORTA[0]` is shorted into **PA0**, while when it is set to input (LOW) it makes the tri-state buffer function as an open circuit, so the **PA0** is driven by the external voltage and it is shorted into `PINA[0]`.
+
+#### Simplified Circuitry:
+![Circuit schematic for a single ATmega32 GPIO pin showing internal connections for PA0. The primary subject is the path linking DDRA, PORTA, and PINA to the external pin through a tri state buffer controlled by DDRA. The diagram annotates behavior for DDRA set to output versus input and includes labeled nodes PA0, DDRA, PORTA, and PINA. The image is technical and neutral.]
+
+#### Datasheet's Circuitry:
+![Datasheet style schematic illustrating the GPIO circuit for PA0 and the interaction of DDRA, PORTA, and PINA through a tri state buffer. The primary subject is the documented hardware connection used to explain when the pin is driven internally or read from an external source. Labels and circuit symbols match datasheet conventions on a white background and the tone is formal and technical.]
+
+This circuitry is repeated for every pin.
+Pxn stands for Pin at port x at bit n, as x and n are only a placeholders, x can be anything from [A, B, C, D] and n can be number between [0-7]. The same rule applies to DDRxn, PORTxn, and PINxn.
+
+# Trivial Program
+Example:
+We want to connect a led on PA2 pin, We want the led to be toggled each second. 
+First: You need to set the DDRA bit 2 to HIGH. 
+Second: You need to toggle the PORTA bit 2 each second. 
+Declaring the Pin as output pin is done in initialization part of the code (setup), while toggling the pin each second is done inside the loop part of the code. 
+```c
+#include<avr/io.h> // to use registers
+#include <util/delay.h> // to use _delay_ms() 
+#define F_CPU 8000000UL // to use _delay_ms()
+
+int main(void) {
+  DDRA = 0x4; // Trivial Way
+  while(1) {
+    PORTA = 0x4;
+    _delay_ms(1000);
+    PORTA = 0x0;
+    _delay_ms(1000);
+  }
+}
+```
+This is the most stupid implementation ever, you are changing all the bits while you are changing the bit you want, this problem can ve solved easily using Bitmasking. 
+`_delay_ms(1000);` will be discussed further the next session. 
+
+A better Approach:
+```c
+#include <avr/io.h> // to use registers
+#include <util/delay.h> // to use _delay_ms() 
+#define F_CPU 8000000UL // to use _delay_ms()
+
+int main(void) {
+  DDRA |= (1<<2);
+  while(1) {
+    PORTA |= (1<<2);
+    _delay_ms(1000);
+    PORTA &= ~(1<<2);
+    _delay_ms(1000);
+  }
+}
+```
+
+This approach is better as here we used bit masking instead of hardcoding the PORT. 
+
+```c
+#include <avr/io.h> // to use registers
+#include <util/delay.h> // to use _delay_ms() 
+#define F_CPU 8000000UL // to use _delay_ms()
+
+int main(void) {
+  DDRA |= (1<<2);
+  while(1) {
+    PORTA ^= (1<<2);
+    _delay_ms(1000);
+  }
+}
+```
+This a more better approach as here I am only toggling, not setting then reseting repeatedly. 
+
+If we want to connect that on Protues, the connection will be like this:
+
+![Schematic of a simple LED circuit connected to an ATmega32 microcontroller pin. The primary subject is a light emitting diode connected to PA2 through a current limiting resistor, with the other side connected to ground. The wider environment is a Proteus simulation workspace with a schematic grid and standard component symbols. The tone is practical and instructional. The diagram includes the LED, resistor, and microcontroller pin labels.](/Interfacing/Attachments/proteus-led-connection.png)
+
+To run this simulatuon we need to set the clock of the MCU and upload the code to it.
+Double click the MCU, For now, we will set the clock to 8MHZ, like this:
+
+![Proteus properties window for the microcontroller clock configuration. The primary subject is the configuration panel with the MCU clock frequency set to 8 MHz. The wider environment is the simulation software interface used to configure the chip before running the circuit. The tone is neutral and technical. The visible text includes 8 MHz and related clock settings.](/Interfacing/Attachments/proteus-clock-conf.png)
+
+We must locate the hex file generated by the avr compiler into the Protues MCU. 
+
+![Proteus MCU properties dialog for loading the compiled program file. The primary subject is the file selection area where the compiled hex file is assigned to the microcontroller. The wider environment is the simulation software interface with property fields and action buttons. The tone is instructional and functional. The visible text includes references to the program file and device configuration options.](/Interfacing/Attachments/proteus-hex-conf.png)
+
+Bit Masking is widely used in embedded applications so by convention the embedded software engineers creates a header file containing all bit masking techniques using macros like functions.
+
+```c
+// std_macros.h
+
+#ifndef STD_MACROS_H_
+#define STD_MACROS_H_
+
+#define REGISTER_SIZE 8
+#define SET_BIT(reg,bit)     reg|=(1<<bit)
+#define CLR_BIT(reg,bit)     reg&=~(1<<bit)
+#define TOG_BIT(reg,bit)     reg^=(1<<bit)
+#define READ_BIT(reg,bit)    ((reg&(1<<bit))>>bit)
+#define IS_BIT_SET(reg,bit)  (reg&(1<<bit))>>bit
+#define IS_BIT_CLR(reg,bit)  !((reg&(1<<bit))>>bit)
+#define ROR(reg,num)         reg=(reg<<(REGISTER_SIZE-num))|(reg>>(num))
+#define ROL(reg,num)         reg=(reg>>(REGISTER_SIZE-num))|(reg<<(num))
+
+#endif
+```
+
+Then the implementation will be like this:
+```c
+#include <avr/io.h> // to use registers
+#include <util/delay.h> // to use _delay_ms() 
+#define F_CPU 8000000UL // to use _delay_ms()
+#include "std_macros.h" // to use macros
+
+int main(void) {
+  SET_BIT(DDRA, 2);
+  while(1) {
+    TOG_BIT(PORTA, 2);
+    _delay_ms(1000);
+  }
+}
+```
+
+# But what's DDRA? 
+In the code you type `DDRA`, `PORTA` and `PINA`, but what are they? Are they variables, macros or objects?
+
+The ATmega32 microcontroller is based on the **Harvard architecture**. It features separate buses for Program Memory (Flash) and Data Memory (SRAM, I/O, and GPRs), enabling single-cycle pipelined instruction execution without structural hazards between instruction fetch and data access.
+
+The internal **EEPROM is physically and logically distinct from both Flash and Data Memory**. It does not share an address space with SRAM and is not directly memory-mapped. Instead, EEPROM is accessed indirectly through dedicated peripheral I/O registers (EEAR, EEDR, and EECR).
+
+The ATmega32 has:
+- ​**Flash:** A 16-bit instruction bus and a 14-bit program address bus (16\text{K} \times 16\text{-bit} word addressing = 32 KB).
+- ​**Data Memory:** An 8-bit data bus and a 16-bit address bus (allowing an addressing range up to 64 KB).
+
+​The linearly memory-mapped Data Memory space interfaces with:
+
+- ​**General Purpose Working Registers (GPRs):** Addresses 0 to 31 (0x0000–0x001F, 32 bytes)
+- ​**I/O Registers:** Addresses 32 to 95 (0x0020–0x005F, 64 bytes)
+- ​**Internal SRAM:** Addresses 96 to 2143 (0x0060–0x085F, 2048 bytes / 2 KB)
+
+> ​Addresses 2144 to 65535 are unmapped and reserved.
+
+> ​Keeping the 16-bit bus structure allows the entire AVR family to share the exact same compiler toolchain (like GCC/AVR-libc), assembler instructions, and CPU execution units without paying for a custom silicon design for each memory size.
+
+![Block diagram of AVR general purpose working registers. The primary subject is the register file for the ATmega32 showing 32 registers, numbered from R0 through R31, with addresses shown as hex values from 0x00 to 0x1F. The wider environment is a technical datasheet diagram on a clean white background. The tone is neutral and explanatory. The visible text includes the register names and address ranges.](/Interfacing/Attachments/AVR-CPU-GP-Working-Registers.png)
+
+This image is form the datasheet, when you see $00 you have to interpret it as 00 in hexadecimal like 0x00 in C. As they are 32 only registers taking only two hexadecimal places, so he is writing only two hexadecimal places ranging from $00 (0x0000) (R0) to $1F (0x001F) (R31).
+
+
+
+![ATmega32 data memory map diagram showing the 16-bit address space divided into General Purpose Working Registers at 0x0000 to 0x001F, I/O Registers at 0x0020 to 0x005F, and Internal SRAM at 0x0060 to 0x085F. The diagram also labels the 64 KB address range, highlights that addresses 2144 to 65535 are unmapped and reserved, and includes a note explaining the Harvard architecture and the shared compiler toolchain across AVR devices. The image is a technical block diagram on a simple white background with clear, instructional labels and a neutral academic tone.](/Interfacing/Attachments/Data-Memory-Map.png)
+
+As you can see here, internal SRAM, Register file (GPRs) and IO Regsiters are connected in the same address space (Memory Mapped together), the address space of the IO Registers starts after the end of the Register file address space from $20 (0x20) into $5F (0x5F), then the internal SRAM address space starts right after them, from $0060 to $085F.
+
+![Memory map diagram of the ATmega32 data memory space. The primary subject is the address range showing the general purpose working registers from 0x0000 to 0x001F, the I O register block from 0x0020 to 0x005F, and the internal SRAM block from 0x0060 to 0x085F. The wider environment is a technical whiteboard style diagram with labeled memory sections. The tone is explanatory and instructional. The visible text includes the memory addresses and section labels.](/Interfacing/Attachments/IO-Memory-Map.png)
+If we take a look here, we can see that the addresses each IO register have two faces each, one is offset and one is the base.
+The base is the starting of the IO register ($0020), and the offset is how far a register is from it.
+If we take the first register as an example, it has an offset of 0, and the base is ($0020), so its address is ($0020), you can see it labeled on the left with its offset, and labeled in the right with its real addrsss.
+
+![ATmega32 digital I O register summary diagram. The primary subject is a register map showing the memory addresses and bit layout for the AVR digital I O peripherals, including the DDR, PORT, and PIN register groups for each port. The wider environment is a technical datasheet table on a clean white background. The tone is explanatory and reference-oriented. Visible text includes labels such as PORTA, DDRA, PINA, and the memory address ranges from 0x20 to 0x5F.](/Interfacing/Attachments/DIO-Registers-Summary.png)
+Here are the addresses of the twelve DIO Registers we discussed earlier, at the very left column you have the offset written first, then the actual address written in paranthesis.
+
+---
+
+```c
+*(500) = 7;
+```
+In this program, the programmer tries to set the address 500 with the value 7, if this code compiles it will get a runtime error (sigmentation fault specifacly), but normally this code won't compile, it gets a compilation error, trying to dereference a variable that is not an address (dereferencing int).
+
+If I know that `500` won't get a segmentation fault, I can store it in a pointer and dereference that pointer. But instead of making a whole pointer, we can only cast it into a pointer.
+
+```c
+*( (int *) 500 )= 7;
+```
+Here it is casted into pointer to int, which means it accesses 4 bytes starting from address `500`.
+
+Normally we use this technique with GPRs and IO Registers, we don't use it with SRAM as we don't know how the layout of an SRAM is. But Normally we don't access the GPRs So, mainly this is your only way to access the IO Registers.
+
+If I want to access *DDRB* and set all port B pins to output, I type its address ($37)
+
+```c
+( * (unsigned char *) (0x0037) ) = 0xFF;
+```
+
+Back to our problem, What is happening when I type 'DDRA', 'DDRA' is defined as macro that has the address of that register hardcoded like this:
+
+It is incovnenient to write all this just for an access, so a better approach is to use macros.
+
+```c
+#define DDRB (*(unsigned char *) (0x0037))
+```
+
+This is better so you can use `DDRB` direct in the code:
+```c
+#include <util/delay.h>
+#define F_CPU 8000000UL
+
+#define DDRB (*(unsigned char *) (0x0037))
+#define PORTB (*(unsigned char *) (0x0038))
+
+int main(void) {
+
+  DDRB = 0xFF;
+
+  while(1) {
+    PORTB ^= (1<<2);
+    _delay_ms(1000);
+  }
+}
+```
+Although this code will compile, it won't work as expected, this is because the compiler optimizations.
+One of the compiler optimizations is to remove the unused effects or the effects that has its contraversal.
+Here you are setting a bit then resetting it, so, the compiler sees that you are doing the thing and its opposite with no purpose, so it deletes the code.
+`volatile` keyword cancels the optimization, tells the compiler that this variable or macro is changing unexpectedly.
+
+```c
+#include <util/delay.h>
+#define F_CPU 8000000UL
+
+#define DDRB (*(unsigned char *) (0x0037))
+#define PORTB (*(volatile unsigned char *) (0x0038))
+
+int main(void) {
+
+  DDRB = 0xFF;
+
+  while(1) {
+    PORTB ^= (1<<2);
+    _delay_ms(1000);
+  }
+}
+```
+
+All the IO Registers are defined the same way as macros and put in the header file `<avr/io.h>`.
+
+In ARM Processors, each register is of size 32 bit so it is casted into `long` instead of `char`.
+
+If we see ther real implementation of the `<avr/io.h>`, we will find that the implementation is done in a workaround.
+
+```c
+/*
+code snippet from 'iom32.h'
+*/
+
+/* Port A */
+#define PINA    _SFR_IO8(0x19)
+#define DDRA    _SFR_IO8(0x1A)
+#define PORTA   _SFR_IO8(0x1B)
+```
+The `_SFR_IO8()` is a macro like a function, SFR part stands for special functions registers (IO Registers).
+
+```c
+typedef unsigned char uint8_t;
+#define __SFR_OFFSET 0x20
+#define _MMIO_BYTE(mem_addr) (*(volatile uint8_t *)(mem_addr))
+#define _SFR_IO8(io_addr) _MMIO_BYTE((io_addr) + __SFR_OFFSET)
+```
+
+As we discussed earlier we have an offset and a base (start). Looking at `#define _SFR_IO8(io_addr) _MMIO_BYTE((io_addr) + __SFR_OFFSET)`
+It takes the `io_addr` which is the logical address adds it to the offset to get the actual address then cast it.
+
+If we have DDRB ($17) this address is a logical address, the address from the start of the IO Register, but its actual address is ($37), it is added to ($20) (`_SFR_OFFSET`).
+
+```c
+#define _SFR_IO8(io_addr) _MMIO_BYTE((io_addr) + __SFR_OFFSET) 
+
+// So,
+_SFR_IO8(0x17)
+
+// expands to:
+_MMIO_BYTE((0x17) + 0x20)
+
+// which expands to:
+(*(volatile unit8_t *(0x37)))
+
+// which exapnds to:
+(*(volatile unsigned char * (0x37)))
+```
+
+---
+
+# DIO Driver
+A driver normally consists of two files:
+- Header file:
+Contains the prototypes of the functions.
+- Source file
+Contains the implementation of those functions.
+
+# Functions:
+## `DIO_SetPinDir(uint8_t port, uint8_t pinNum, uint8_t dir)`
+This function is to set the direction of a speicific pin at a specific port.
+The `v` part in the function's name is an indication that the functions returns nothing (void).
+```c
+// main.c
+
+int main(void) {
+
+  DIO_setPinDir('A', 3, 1);
+
+  while(1) {
+
+  }
+}
+```
+
+```c
+// dio.c
+
+void DIO_SetPinDir(uint8_t port, uint8_t pinNum, uint8_t dir) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      if(dir) {
+        SET_PIN(DDRA, pinNum);
+      } else {
+        CLR_PIN(DDRA, pinNum);
+      }
+    break;
+
+    case 'B':
+    case 'b':
+      if(dir) {
+        SET_PIN(DDRB, pinNum);
+      } else {
+        CLR_PIN(DDRB, pinNum);
+      }
+    break;
+
+    case 'C':
+    case 'c':
+      if(dir) {
+        SET_PIN(DDRC, pinNum);
+      } else {
+        CLR_PIN(DDRC, pinNum);
+      }
+    break;
+
+    case 'D':
+    case 'd':
+      if(dir) {
+        SET_PIN(DDRD, pinNum);
+      } else {
+        CLR_PIN(DDRD, pinNum);
+      }
+    break;
+
+    default:
+    break;
+  }
+}
+```
+
+## `DIO_WritePin(uint8_t port, uint8_t pinNum, uint8_t state)`
+This function outputs logical high or logical low on a specific pin in a specific port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetPinDir('A', 3, 1);
+  DIO_WritePin();
+
+  while(1) {
+
+  }
+}
+```
+
+```c
+// dio.c
+
+void DIO_WritePin(uint8_t port, uint8_t pinNum, uint8_t state) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      if(state) {
+        SET_PIN(PORTA, pinNum);
+      } else {
+        CLR_PIN(PORTA, pinNum);
+      }
+    break;
+
+    case 'B':
+    case 'b':
+      if(state) {
+        SET_PIN(PORTB, pinNum);
+      } else {
+        CLR_PIN(PORTB, pinNum);
+      }
+    break;
+
+    case 'C':
+    case 'c':
+      if(state) {
+        SET_PIN(PORTC, pinNum);
+      } else {
+        CLR_PIN(PORTC, pinNum);
+      }
+    break;
+
+    case 'D':
+    case 'd':
+      if(state) {
+        SET_PIN(PORTD, pinNum);
+      } else {
+        CLR_PIN(PORTD, pinNum);
+      }
+    break;
+
+    default:
+    break;
+  }
+}
+```
+
+## `DIO_TogglePin(uint8_t port, uint8_t pinNum)`
+This function toggles a specific pin in a specific port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_setPinDir('A', 3, 1);
+  DIO_vwritePin();
+
+  while(1) {
+    DIO_vtogglePin('A', 3);
+  }
+}
+```
+
+```c
+// dio.c
+
+void DIO_TogglePin(uint8_t port, uint8_t pinNum) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      TOG_BIT(DDRA, pinNum);
+    break;
+
+    case 'B':
+    case 'b':
+      TOG_BIT(DDRB, pinNum);
+    break;
+
+    case 'C':
+    case 'c':
+      TOG_BIT(DDRC, pinNum);
+    break;
+
+    case 'D':
+    case 'd':
+      TOG_BIT(DDRD, pinNum);
+    break;
+
+    default:
+    break;
+  }
+}
+```
+
+## `DIO_ReadPin(uint8_t port, uint8_t pinNum)`
+This function reads the state of a specific pin in a specific port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetPinDir('A', 3, 1);
+  DIO_WritePin();
+
+  while(1) {
+    uint8_t ledState = DIO_ReadPin('A', 3);
+  }
+}
+```
+
+```c
+// dio.c
+
+uint8_t DIO_ReadPin(uint8_t port, uint8_t pinNum) {
+  
+  uint8_t state = 0;
+
+  switch(port) {
+    case 'A':
+    case 'a':
+      state = READ_BIT(PINA, pinNum);
+    break;
+
+    case 'B':
+    case 'b':
+      state = READ_BIT(PINB, pinNum);
+    break;
+
+    case 'C':
+    case 'c':
+      state = READ_BIT(PINC, pinNum);
+    break;
+
+    case 'D':
+    case 'd':
+      state = READ_BIT(PIND, pinNum);
+    break;
+
+    default:
+    break;
+  }
+
+  return state; 
+}
+```
+---
+
+> Those 4 functions can be implemented on a port level not only specific pins.
+
+---
+
+## `DIO_SetChannelDir(uint8_t port, uint8_t dir)`
+This function sets the direction for a whole port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetChannelDir('A', 0xFF);
+
+  while(1) {
+
+  }
+}
+```
+
+```c
+// dio.c
+void DIO_SetChannelDir(uint8_t port, uint8_t dir) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      DDRA = dir;
+    break;
+
+    case 'B':
+    case 'b':
+      DDRB = dir;
+    break;
+
+    case 'C':
+    case 'c':
+      DDRC = dir;
+    break;
+
+    case 'D':
+    case 'd':
+      DDRD = dir;
+    break;
+
+    default:
+    break;
+  }
+}
+```
+
+## `dio_WriteChannel(uint8_t port, uint8_t state)`
+This function accepts a port and a state and writes this state to the pins of that port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetChannelDir('A', 0xFF);
+
+  while(1) {
+      DIO_WriteChannel('A', 0xFF);
+  }
+}
+```
+
+```c
+// dio.c
+void dio_WriteChannel(uint8_t port, uint8_t state) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      PORTA = state;
+    break;
+
+    case 'B':
+    case 'b':
+      PORTB = state;
+    break;
+
+    case 'C':
+    case 'c':
+      PORTC = state;
+    break;
+
+    case 'D':
+    case 'd':
+      PORTD = state;
+    break;
+
+    default:
+    break;
+  }
+}
+```
+
+
+## `dio_ReadChannel(uint8_t port)`
+This function returns the state of a whole specific port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetChannelDir('A', 0xFF);
+
+  while(1) {
+      DIO_ReadChannel('A', 0xFF);
+  }
+}
+```
+
+```c
+// dio.c
+
+uint8_t DIO_ReadChannel(uint8_t port, uint8_t state) {
+
+  uint8_t state = 0;
+
+  switch(port) {
+    case 'A':
+    case 'a':
+      state = PINA;
+    break;
+
+    case 'B':
+    case 'b':
+      state = PINB;
+    break;
+
+    case 'C':
+    case 'c':
+      state = PINC;
+    break;
+
+    case 'D':
+    case 'd':
+      state = PIND;
+    break;
+
+    default:
+    break;
+  }
+
+  return state;
+}
+```
+
+## `DIO_TogglePort(uint8_t port)`
+This function toggles all the pins inside a specific port.
+
+```c
+// main.c
+
+int main(void) {
+
+  DIO_SetChanenlDir('A', 0xFF);
+
+  while(1) {
+      DIO_ToggleChannel('A', 0xFF);
+  }
+}
+```
+
+```c
+// dio.c
+
+void DIO_ToggleChannel(uint8_t port) {
+  switch(port) {
+    case 'A':
+    case 'a':
+      PORTA ^= 0xFF;
+      /*
+        You can also use bitwise not:
+          PORTA = ~PORTA;
+      */
+    break;
+
+    case 'B':
+    case 'b':
+      PORTB ^= 0xFF;
+    break;
+
+    case 'C':
+    case 'c':
+      PORTC ^= 0xFF;
+    break;
+
+    case 'D':
+    case 'd':
+      PORTD ^= 0xFF;
+    break;
+
+    default:
+    break;
+  }
+
+  return state;
+}
+```
